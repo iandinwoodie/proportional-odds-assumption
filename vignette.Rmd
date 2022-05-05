@@ -1,0 +1,317 @@
+---
+title: "The Proportional Odds Assumption for Ordinal Logistic Regression"
+author: "Ian Dinwoodie"
+date: "May 4th, 2022"
+output: pdf_document
+numbersections: true
+bibliography: [packages.bib, references.bib]
+csl: apa.csl
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(simstudy)
+library(ordinal)
+library(data.table)
+library(ggplot2)
+library(car)
+library(peopleanalyticsdata)
+library(MASS)
+
+knitr::write_bib(file = 'packages.bib')
+set.seed(1)
+```
+
+# Introduction
+
+Generalized linear models (GLMs) provide a unified approach to developing models for arbitrarily distributed response variables with an arbitrary link function that varies linearly with its predictors. Two such models we have examined thus far are binary and multinomial logistic regression; both of which are used for modeling nominal outcomes. However, if we wish to model ordinal outcomes, then choosing a model that accounts for the natural ordering of the response—such as ordinal logistic regression—can help avoid an unnecessary loss in statistical power [@agresti_categorical_2013]. When considering the employment of an ordinal logistic regression, one oft-overlooked requirement is satisfaction of the proportional odds assumption. @fullerton_proportional_2012 claimed that “[t]he proportional odds assumption in ordered logit models is a restrictive assumption that is often violated in practice.” During the peer review cycles for my most recent publication, @dinwoodie_investigation_2021, it was determined that the ordered logit model I had employed was in violation of the proportional odds assumption. Due to the time constraints for revisions in the review cycle I employed a less restrictive model without taking the time to develop a comprehensive understanding of the proportional odds assumption I had previously violated.
+
+Therefore, I use paper to explore the proportional odds assumption required for ordinal logistic regression; namely, what the assumption is, why it is necessary, and how it can be evaluated. This paper begins with a discussion of the theory underlying ordinal logistic regression to arrive at the necessity of the proportional odds assumption from a mathematical perspective. We then put the theory to test with simulated examples of proportional and non-proportional odds and discuss further handling of the later scenario. Lastly, we conclude with a brief discussion of challenges, limitations, and topics for further consideration.
+
+# Background
+
+## Ordinal Data
+
+Ordinal data is a categorical data type that has an order by which the data can be sorted, but the relative degree of difference between categories cannot be assumed equal [@stevens_theory_1946]. Therefore, the ordinal scale only allows for less-than, equal-to, or greater-than comparisons. A ubiquitous example of ordinal data is the use of letter grades for coursework.
+
+## Ordinal Logistic Regression
+
+Ordinal logistic regression is a statistical method used model the relationship between an ordinal response variable given one or more independent explanatory variables. Popular functions used to perform ordinal logistic regression in R (i.e., `MASS::polr`, `VGAM::vglm`, `ordinal::clm`) generate an ordered logit model; a cumulative link model with a logit link [@christensen_cumulative_nodate].
+
+### Model Paramterization
+
+Let $Y$ be an outcome with $J$ categories such that $P(Y\leq j)$ is the cumulative probability of $Y$ less than or equal to a specific category $j$. The odds of an outcome equal to or less than a particular category $j$ can be defined as
+$$\frac{P(Y\leq j)}{P(Y > j)}, \hspace{2mm} j=1,...,J-1.$$
+The logit, also known as log odds, of an outcome equal to or less than a particular category $j$ can be defined as
+$$logit(P(Y\leq j)) = ln(\frac{P(Y\leq j)}{P(Y > j)}), \hspace{2mm} j=1,\ldots,J-1.$$
+Due to the fact that the outcome is both categorical and ordered, we divide the probability space into $J$ contiguous segments. Let $\theta_j$ denote the offset for each category. We use the definition of the logistic function to define the probability for an outcome in the lowest category of $j$ (i.e., $j=1$) when there are $p$ predictor variables
+$$P(Y=1) = \frac{1}{1+e^{-(\theta_1+\beta_1 x_1 + \ldots + \beta_p x_p)}}.$$
+We can use this probability equation to derive the associated odds
+$$
+\begin{aligned}
+\frac{P(Y=1)}{P(Y>1)} = \frac{P(Y=1)}{1-P(Y=1)} &= \frac{\frac{1}{1+e^{-(\theta_1 +\beta_1 x_1 + \ldots + \beta_p x_p)}}}{1 - \frac{1}{1+e^{-(\theta_1+\beta_1 x_1 + \ldots + \beta_p x_p)}}} \\
+&= \frac{\frac{1}{1+e^{-(\theta_1+\beta_1 x_1 + \ldots + \beta_p x_p)}}}{\frac{e^{-(\theta_1+\beta_1 x_1 + \ldots + \beta_p x_p)}}{1+e^{-(\theta_1+\beta_1 x_1 + \ldots + \beta_p x_p)}}} \\
+&= \frac{1}{e^{-(\theta_1+\beta_1 x_1 + \ldots + \beta_p x_p)}} \\
+&= e^{\theta_1+\beta_1 x_1 + \ldots + \beta_p x_p}
+\end{aligned}
+$$
+We take the log of the odds to get the logit for the outcome being in the lowest category of $j$
+$$logit(\frac{P(Y=1)}{P(Y>1)}) = ln(e^{\theta_1+\beta_1 x_1 + \ldots + \beta_p x_p})=\theta_1+\beta_1 x_1 + \ldots + \beta_p x_p.$$
+If we similarly derive the logit for the outcome being in the highest category of $j$ we get
+$$logit(\frac{P(Y\leq J-1)}{P(Y=J)}) =\theta_{J-1}+\beta_1 x_1 + \ldots + \beta_p x_p.$$
+We can generalize these last two derivations to arrive at the parameterization for the ordered logit model
+$$logit(\frac{P(Y\leq j)}{P(Y>j)}) =\theta_{j}+\beta_1 x_1 + \ldots + \beta_p x_p, \hspace{2mm} j=1,...,J-1.$$
+It is important to note that this is not the only parameterization of the model. @parry_ordinal_2020 states that the following alternative parameterization incorporates a negative sign to allow a direct correspondence between the slope and the ranking:
+$$logit(\frac{P(Y\leq j)}{P(Y>j)}) =\theta_{j} - (\beta_1 x_1 + \ldots + \beta_p x_p), \hspace{2mm} j=1,...,J-1.$$
+According to @parry_ordinal_2020 this is the parameterization model that is used by the `MASS::polr` function which we utilize later in this paper.
+
+Regardless of the specific parameterization, it is clear from these models that the impact of a unit change in $x_p$ on the odds of $Y$ being in a higher ordinal category is $\beta_p$, regardless of what category of $j$ we are looking at. Therefore, we have a single set of coefficients to explain the effect of $x$ on $Y$ throughout the ordinal scale [@R-peopleanalyticsdata].
+
+### Proportional Odds Asumption
+
+The proportional odds assumption is an immediate consequence of the single set of non-intercept coefficients that apply to all response levels of the ordered logit model. If we consider $\theta_j$ to be the intercept and $\beta_1 x_1 + \ldots + \beta_p x_p$ to be the slope, then the ordered logit requires that the slope remain constant across $j=1,...,J-1$. If you were to plot the cumulative logits for each category, then you would expect to have a plot with $J-1$ parallel lines; each with an offset corresponding to the respective $\theta_j$. For this reason, the proportional odds assumption is also known as the parallel lines assumption. Violation of the proportional odds assumption for as few as one response level results in improperly fitted $\theta$ and $\beta$ coefficients. We illustrate this effect in the sections that follow.
+
+# Evaluating the Proportional Odds Assumption
+
+## Methods
+
+Evaluation of the proportional odds assumption in this paper was conducted using the R statistical language [@R-base]. Ordinal data sets, with and without the assumption of proportional odds, were simulated using functions and code snippets provided by the `simstudy` package [@simstudy2020]. Simulated data sets were fitted to ordinal logistic regression models using the `MASS` package [@R-MASS]. The proportional odds assumption was verified both visually and quantitatively. Quantitative verification was performed using the `car` package [@car2019]. Plots were generated using the `ggplot2` package [@ggplot22016]. The source code for this paper has been made available at [github.com/iandinwoodie/proportional-odds-assumption](https://github.com/iandinwoodie/proportional-odds-assumption).
+
+## Simulation of Proportional Odds
+
+Let's start by simulating a data set with a coursework letter grade response
+that adheres to the following distribution.
+
+```{r table2, echo=FALSE, message=FALSE, warnings=FALSE, results='asis'}
+tabl <- "
+| Grade  | Probability   |
+|:------:|--------------:|
+| A      | 0.21          |
+| B      | 0.43          |
+| C      | 0.32          |
+| D      | 0.03          |
+| F      | 0.01          |
+"
+cat(tabl) # output the table in a format good for HTML/PDF/docx conversion
+```
+
+We can partition a logistic distribution such that each segment corresponds to a letter grade and the area under the curve for each segment represents the probability of earning that grade. This logistic distribution is the latent process that serves as the basis for our data generation. We will assign the data to either an unexposed (i.e., control) or exposed (i.e., experimental) group for use as our predictor. The plot below illustrates this partitioning scheme for the unexposed group.
+
+```{r, echo=FALSE, fig.width=6, fig.height=3}
+x <- seq(-6, 6, length=1000)
+pdf <- dlogis(x, location=0, scale=1)
+dt <- data.table(x, pdf)
+
+# Set thresholds for unexposed group (group A).
+get_thresholds <- function(base_probs) {
+  thresholds <- NULL
+  for (i in 1:(length(base_probs)-1)) {
+    num <- 0
+    den <- 0
+    for (j in 1:length(base_probs)) {
+      if (j <= i) {
+        num <- num + base_probs[j]
+      } else {
+        den <- den + base_probs[j]
+      }
+    }
+    thresholds <- c(thresholds, round(log(num/den), 2))
+  }
+  return(thresholds)
+}
+
+base_probs <- c(0.01, 0.03, 0.32, 0.43, 0.21)
+threshold_a <- get_thresholds(base_probs)
+pdf <- dlogis(threshold_a)
+grp_a <- data.table(threshold=threshold_a, pdf)
+breaks_a <- c(-6, grp_a$threshold, 6)
+
+# Plot density with cut points.
+dt[, grp_a := cut(x, breaks=breaks_a, labels=F, include.lowest=TRUE)]
+ggplot(data=dt, aes(x=x, y = pdf)) +
+  geom_line() +
+  labs(title="Density Plot of Grade Paritions for Unexposed Group") +
+  geom_area(aes(x=x, y=pdf, group=grp_a, fill=factor(grp_a))) +
+  geom_hline(yintercept=0) +
+  #annotate("text", x=-5, y=0.28, label="unexposed", size=5) +
+  scale_fill_manual(values = c("#d0d7d1", "#bbc5bc", "#a6b3a7", "#91a192", "#7c8f7d"),
+                    labels = c("F", "D", "C", "B", "A"),
+                    name = "grade") +
+  scale_x_continuous(breaks=threshold_a) +
+  scale_y_continuous(limits=c(0, 0.3), name="density") +
+  theme(legend.position=c(.85, .5),
+        legend.background=element_rect(fill="grey90"),
+        legend.key = element_rect(color="grey90"),
+        plot.title = element_text(hjust = 0.5))
+```
+
+We simulate some effect of the exposed group by uniformly shifting the partitioning thresholds by a factor of +0.7. This adjustment represents $\beta_{exposed}$ in the model that will be produced. The plot below illustrates this partitioning scheme for the exposed group where the thresholds for the unexposed group are indicated by dashed lines.
+
+```{r, echo=FALSE, fig.width=6, fig.height=3}
+# Set thresholds for exposed group (group B).
+threshold_b <- threshold_a + 0.7
+pdf <- dlogis(threshold_b)
+grp_b <- data.table(threshold=threshold_b, pdf)
+breaks_b <- c(-6, grp_b$threshold, 6)
+
+# Plot density with cut points.
+dt[, grp_b := cut(x, breaks=breaks_b, labels=F, include.lowest=TRUE)]
+ggplot(data=dt, aes(x=x, y=pdf)) +
+  geom_line() +
+  labs(title="Density Plot of Grade Paritions for Exposed Group") +
+  geom_area(aes(x=x, y=pdf, group=grp_b, fill=factor(grp_b))) +
+  geom_hline(yintercept = 0, color = "grey5") +
+  geom_segment(data=grp_a, 
+               aes(x=threshold, xend=threshold, y=0, yend=pdf), 
+               size=0.5, lty=2, color="#857284") +
+  scale_fill_manual(values=c("#d0d7d1", "#bbc5bc", "#a6b3a7", "#91a192", "#7c8f7d"),
+                    labels=c("F", "D", "C", "B", "A"),
+                    name="grade") +
+  scale_x_continuous(breaks=threshold_b) +
+  scale_y_continuous(limits=c(0.0, 0.3), name="density") +
+  theme(legend.position = c(.85, .5),
+        legend.background = element_rect(fill = "grey90"),
+        legend.key = element_rect(color = "grey90"),
+        plot.title = element_text(hjust = 0.5))
+```
+Now we fit the generated data with an ordered logit model and inspect the results. We expect to see this model estimate the parameters we used to prescribe the simulated data.
+
+```{r, echo=FALSE}
+set.seed(5)
+
+def_a <- simstudy::defData(varname="exposed", formula="1;1", dist="trtAssign")
+def_a <- simstudy::defData(def_a, varname="z", formula="-0.7*exposed",
+                           dist="nonrandom")
+dd <- simstudy::genData(25000, def_a)
+dx <- simstudy::genOrdCat(dd, adjVar="z", base_probs, catVar="grade")
+
+m <- MASS::polr(grade ~ exposed, data=dx, Hess=TRUE)
+summary(m)
+```
+
+We see that the coefficient closely aligns with the specified value of 0.7 and that the sign is negated due to the parameterization used by the `MASS::polr` implementation as previously discussed. Additionally, we see the intercepts closely align with the thresholds marked on the density plot for the unexposed group. We begin our evaluation of the proportional odds assumption for this model visually via a cumulative probability plot.
+
+```{r, echo=FALSE}
+get_cum_probs <- function(coefs) {
+  cumprob0 <- data.table(
+    cumprob = c(1/(1 + exp(-coefs[which(rownames(coefs) != "exposed")])), 1),
+    grade = factor(1 : nrow(coefs)),
+    exposed = 0
+  )
+  cumprob1 <- data.table(
+    cumprob = c(1/(1 + exp(-coefs[which(rownames(coefs) != "exposed")] + 
+                             coefs["exposed", 1])), 1),
+    grade = factor(1 : nrow(coefs)),
+    exposed = 1
+  )
+  rbind(cumprob0, cumprob1)[]
+}
+
+plot_m <- function(m, dx) {
+  coefs <- coef(summary(m))
+  cum_mod_probs <- get_cum_probs(coefs)
+  grades <- c("F", "D", "C", "B", "A")
+  levels(cum_mod_probs$grade) <- grades
+  cum_obs_probs <- dx[, .N, keyby = .(exposed, grade)]
+  cum_obs_probs[, cumprob := cumsum(N)/sum(N) , keyby = exposed]
+  levels(cum_obs_probs$grade) <- grades
+  
+  ggplot(data = cum_obs_probs, aes(x = grade, y = cumprob, color = factor(exposed))) +
+    geom_line(data = cum_mod_probs, alpha = 1, aes(group=exposed)) +
+    labs(title="Cumulative Probability Plot of Grade Assignments") +
+    geom_point(size = 1.25) +
+    ylab("cumulative probability") +
+    xlab("grade") +
+    theme(panel.grid = element_blank(),
+          legend.title = element_blank(),
+          plot.title = element_text(hjust = 0.5)) +
+    scale_color_manual(values = c("#7c8e8f", "#8f7c8e"), labels = c("Not exposed", "Exposed"))
+}
+
+plot_m(m, dx)
+```
+
+In the cumulative probability plot we see that the modeled probabilities (i.e., the lines) provide a good estimation of the probabilities we specified in the simulated data (i.e., the points). Next we perform a quantitative assessment of the proportional odds assumption using the Brant test.
+
+```{r, echo=FALSE}
+car::poTest(m)
+```
+
+Our null hypothesis ($H_0$) is that the proportional odds assumption holds. Due to the fact that the overall and individual p-values are above a significance level of 0.05, we fail to reject the null hypothesis. We have now visually and quantitatively verified that the proportional odds assumption holds true and that an ordered logit model is an appropriate model for this data.
+
+## Simulation of Non-proportional Odds
+
+To introduce non-proportional odds we perturb the data of the exposed group by applying an additional adjustment to a single threshold. This shift to an individual threshold breaks the uniformity of the +0.7 shift that had already been applied. We shift the threshold between the third and fourth categories by an additional -1.0 and generate a density plot to observe the effect. The thresholds for the unexposed group are indicated by dashed lines.
+
+```{r, echo=FALSE, fig.width=6, fig.height=3}
+# Adjust the thresholds for exposed group (group B).
+threshold_adj <- c(0.0, 0.0, -1.0, 0.0)
+threshold_b <- threshold_b + threshold_adj
+pdf <- dlogis(threshold_b)
+grp_b <- data.table(threshold=threshold_b, pdf)
+breaks_b <- c(-6, grp_b$threshold, 6)
+
+# Plot density with cut points.
+dt[, grp_b := cut(x, breaks=breaks_b, labels=F, include.lowest=TRUE)]
+ggplot(data=dt, aes(x=x, y=pdf)) +
+  geom_line() +
+  labs(title="Density Plot of Grade Paritions for Exposed Group") +
+  geom_area(aes(x=x, y=pdf, group=grp_b, fill=factor(grp_b))) +
+  geom_hline(yintercept = 0, color = "grey5") +
+  geom_segment(data=grp_a, 
+               aes(x=threshold, xend=threshold, y=0, yend=pdf), 
+               size=0.5, lty=2, color="#857284") +
+  scale_fill_manual(values=c("#d0d7d1", "#bbc5bc", "#a6b3a7", "#91a192", "#7c8f7d"),
+                    labels=c("F", "D", "C", "B", "A"),
+                    name="grade") +
+  scale_x_continuous(breaks=threshold_b) +
+  scale_y_continuous(limits=c(0.0, 0.3), name="density") +
+  theme(legend.position = c(.85, .5),
+        legend.background = element_rect(fill = "grey90"),
+        legend.key = element_rect(color = "grey90"),
+        plot.title = element_text(hjust = 0.5))
+```
+
+Note that the indicator for the third threshold has shifted from 0.12 to -1.88; breaking the uniform shift in thresholds. Now we fit the generated data with an ordered logit model and inspect the results. We expect to see disparities between this model's estimates and the parameters we used to prescribe the simulated data.
+
+```{r, echo=FALSE}
+set.seed(7)
+
+np_adj <- c(threshold_adj, 0.0)
+dx <- genOrdCat(dd, baseprobs=base_probs, adjVar="z", catVar="grade",
+                npVar="exposed", npAdj=np_adj)
+
+m <- MASS::polr(grade ~ exposed, data=dx, Hess=TRUE)
+summary(m)
+```
+
+As expected, the coefficient for `exposed` does not align with any of the prescribed shifts and the estimation of the category thresholds are notable worse than our prior model. We begin our evaluation of the proportional odds assumption for this model visually via a cumulative probability plot.
+
+```{r, echo=FALSE}
+plot_m(m, dx)
+```
+In the cumulative probability plot we see that the modeled probabilities (i.e., the lines) provide a poor estimation of the probabilities we specified in the simulated data (i.e., the points). Next we perform a quantitative assessment of the proportional odds assumption using the Brant test.
+
+```{r, echo=FALSE}
+car::poTest(m)
+```
+
+Our null hypothesis ($H_0$) is that the proportional odds assumption holds. As expected, the test results in p-values that exceed a significance level of 0.05 leading us to reject the null hypothesis. We have now visually and quantitatively verified that the proportional odds assumption is violated and that an ordered logit model is not an appropriate model for this data.
+
+# Handling Non-proportional Odds
+
+The first choice that must be made when handling the non-proportional odds case is whether or not a proportional odds model will continue to be pursued. If one opts not to pursue a proportional odds model, then they could attempt to employ another GLM such multinomial regression. The downsides of multinomial regression include loss in statistical power and increased interpretation complexity due to having separate sets of coefficients for each response level. If it is possible to condense the problem space to a binomial response by collapsing response categories and ease of interpretation is a high priority, then binomial logistic regression can be employed. In addition to the models mentioned, there other advanced models available that aim to address these situations (e.g., adjacent-category logistic model and continuation-ratio logistic model) that are outside the scope of this paper.
+
+If one chooses to continue pursuing a proportional odds model, then a commonly suggested route is to reduce the number of categories by adjusting the number and width of category thresholds (i.e., "squashing" the categories). @simstudy2020 provides evidence in his vignettes that there are scenarios where this solution does not work. @R-ordinal provides guidance in the `ordinal` package vignette for relaxing the proportional odds assumption through the use of nominal and scale effects. 
+
+# Challenges, Limitations, and Topics for Further Discussion
+
+The main challenge I encountered during this project was attempting to generate simulated ordinal response data by hand. Thankfully, after some searching on CRAN I came across the very helpful `simstudy` package and vignettes produced by @simstudy2020 which was designed with ordinal response simulation in mind. An additional challenge I had was choosing a package to use to perform the ordinal regression model fitting. Ultimately I decided to use the `MASS::polr` function due to the wide support for the models it generates.
+
+In order to keep this paper manageable I did not dive into a discussion on the theory behind the Brant test which was used to quantitatively verify the proportional odds assumption. In the same vein, I did not delve into the topics of category "squashing" or relaxing the proportional odds assumption; both of which are topics that could easily lend themselves to their own paper of a similar size.
+
+For further exploration and discussion I would like to investigate the limitations around category "squshing" and relaxing the proportional odds assumption. I think it would also be beneficial to compare such augmented models with binomial or multinomial logistic regression models to compare performance. I believe it would be of great use to produce a chart of the many ways to handle the non-proportional odds case with a clear list of pros and cons for each method.
+
+\newpage
+
+# References
